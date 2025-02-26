@@ -1,0 +1,16 @@
+name: cs595
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pytorch
+  - numpy
+  - pip
+  - ipykernel  # for jupyter notebook support
+  - pip:
+    - ./local_modules/scallopy-0.2.4-cp310-cp310-manylinux_2_27_x86_64.whl
+    - ./local_modules/scallop-0.2.4-py3-none-any.whl
+    - ./local_modules/scallopy_ext-0.2.4-py3-none-any.whl
