@@ -13,3 +13,4 @@ tmp
 /.micromamba/
 /.vsvode/
 *.code-workspace
+/scallopexamples/*

@@ -1,0 +1,102 @@
+/*type Pixel(id: usize, position: usize, value: f64)
+type Label(id: usize, value: String)
+
+// Feature extraction
+type RegionAverage(id: usize, region: usize, avg: f64)
+type PixelRegion(pixel_id: usize, region_id: usize)
+
+rel PixelRegion(pixel_id, region_id) :-
+    let x = pixel_id % 28;
+*/
+
+type Pixel(x: i32, y: i32, value: f32)
+rel Pixel = { // A
+    (15,4,1.000000),
+    (15,5,1.000000),
+    (14,6,0.603922),
+    (15,6,1.000000),
+    (13,7,1.000000),
+    (16,8,0.137255),
+    (12,9,0.105882),
+    (16,9,1.000000),
+    (12,10,1.000000),
+    (16,10,1.000000),
+    (12,11,0.913725),
+    (16,11,1.000000),
+    (11,12,0.176471),
+    (16,12,0.819608),
+    (11,13,1.000000),
+    (11,14,0.819608),
+    (15,14,0.839216),
+    (16,14,1.000000),
+    (17,14,1.000000),
+    (18,14,1.000000),
+    (10,15,0.639216),
+    (11,15,1.000000),
+    (17,15,1.000000),
+    (10,16,1.000000),
+    (17,16,0.749020),
+    (9,17,0.321569),
+    (17,17,0.094118),
+    (9,18,0.678431),
+    (18,18,0.176471),
+    (8,19,1.000000),
+    (18,19,1.000000),
+    (8,20,0.054902),
+    (18,20,1.000000),
+    (5,21,0.607843),
+    (7,21,1.000000),
+    (18,21,0.278431),
+    (6,22,0.733333),
+    (19,22,0.392157),
+    (19,23,1.000000)
+}
+
+type Expr = Const(f32) | Add(Expr, Expr) | Sub(Expr, Expr) | Mult(Expr, Expr) | Div(Expr, Expr)
+
+type eval (bound e: Expr, v: f32)
+rel eval(e, v) = case e is Const(v)
+rel eval(e, v1 + v2) = case e is Add(e1, e2) and eval(e1, v1) and eval(e2, v2)
+rel eval(e, v1 - v2) = case e is Sub(e1, e2) and eval(e1, v1) and eval(e2, v2)
+rel eval(e, v1 * v2) = case e is Mult(e1, e2) and eval(e1, v1) and eval(e2, v2)
+rel eval(e, v1 / v2) = case e is Div(e1, e2) and eval(e1, v1) and eval(e2, v2)
+
+type parsed_expr(e: Expr)
+
+rel result(v) = parsed_expr(e) and eval(e,v)
+
+query eval(e, 3.0 / 2.0)
+query result
+
+
+
+type RegionAverage(rx: i32, rx: i32, avg: f32)
+rel RegionAverage(rx, ry, avg) = Pixel(rx, ry, avg)
+
+/*
+rel RegionAverage(id, region, avg) :-
+    // Divide the image into regions and calculate average pixel values
+    Pixel(id, position, value),
+    region = position / 49,
+    // Divide 28x28 image into 16 regions
+    agg<<avg = mean(value)>> by (id, region).
+
+// Classification rule using probabilistic reasoning
+type CharacterFeature(id: usize, feature_vector: Vec<float>)
+rel CharacterFeature(id, features) :-
+    // Collect features from all regions
+    features = vec_agg<<region_avg>> by (id, region) <-
+        RegionAverage(id, region, region_avg),
+        ord by (region).
+
+// Probabilistic label prediction
+type PredictedLabel(id: usize, label: String)
+rel PredictedLabel(id, label) :-
+    CharacterFeature(id, features),
+    Label(other_id, label),
+    // Compute similarity to known examples
+    other_id != id,
+    // This would be enhanced with more sophisticated
+    // similarity metrics in a real application
+    id @ label.  // Probabilistic assignment
+*/

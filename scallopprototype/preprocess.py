@@ -62,6 +62,32 @@ def preprocess_image(image_path, target_size=(28, 28), visualize=False):
     
     return normalized
 
+def save_image_as_text(image_array, filename):
+    """
+    Save image pixel information to a text file in (x,y,value) format.
+    
+    Args:
+        image_array (numpy.ndarray): The processed image array
+        filename (str): Name of the output file
+    """
+    # Create directory if it doesn't exist
+    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "input_processed")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Full path to output file
+    output_path = os.path.join(output_dir, filename)
+    
+    # Write pixel information to file
+    with open(output_path, 'w') as f:
+        height, width = image_array.shape
+        for y in range(height):
+            for x in range(width):
+                # Only write non-zero pixels for efficiency
+                if image_array[y, x] > 0:
+                    f.write(f"{x},{y},{image_array[y, x]:.6f}\n")
+    
+    print(f"Pixel information saved to {output_path}")
+
 def test_preprocessing():
     """
     Simple test function for the preprocessing pipeline.
@@ -75,6 +101,12 @@ def test_preprocessing():
         processed = preprocess_image(image_path, visualize=True)
         print(f"Preprocessed image shape: {processed.shape}")
         print(f"Pixel value range: {processed.min()} to {processed.max()}")
+        print(f"Image as array: {processed.tolist()}")
+        
+        # Save pixel information to text file
+        base_filename = os.path.basename(image_path)
+        output_filename = f"{os.path.splitext(base_filename)[0]}_pixels.txt"
+        save_image_as_text(processed, output_filename)
     except Exception as e:
         print(f"Error during preprocessing: {e}")
 
