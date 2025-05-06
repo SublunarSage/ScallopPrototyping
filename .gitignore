@@ -12,5 +12,9 @@ tmp
 
 /.micromamba/
 /.vsvode/
+/data/
+/data/EMNIST/*
+/data/MNIST/*
+/model/
 *.code-workspace
-/scallopexamples/*
+/.scallopexamples/

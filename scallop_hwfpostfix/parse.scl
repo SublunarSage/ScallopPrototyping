@@ -1,0 +1,53 @@
+// Inputs...
+type symbol(usize, String)
+type length(usize)
+
+// Facts to lex...
+rel digit = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"}
+rel mult_div = {"*", "/"}
+rel plus_minus = {"+", "-"}
+
+// Parse the values
+type value_node(id: u64, string: String, begin: usize, end: usize)
+rel value_node($hash(x, d), d, x, x + 1) = symbol(x, d), digit(d), length(n), x < n
+
+type mult_div_node(id: u64, string: String, left_node: u64, right_node: u64, begin: usize, end: usize)
+rel mult_div_node(id, string, 0, 0, b, e) = value_node(id, string, b, e)
+rel mult_div_node($hash(id, s, l, r), s, l, r, b, e) =
+  symbol(id, s), mult_div(s), mult_div_node(l, _, _, _, b, id), value_node(r, _, id + 1, e)
+
+type plus_minus_node(id: u64, string: String, left_node: u64, right_node: u64, begin: usize, end: usize)
+rel plus_minus_node(id, string, l, r, b, e) = mult_div_node(id, string, l, r, b, e)
+rel plus_minus_node($hash(id, s, l, r), s, l, r, b, e) =
+  symbol(id, s), plus_minus(s), plus_minus_node(l, _, _, _, b, id), mult_div_node(r, _, _, _, id + 1, e)
+
+type root_node(id: u64)
+rel root_node(id) = plus_minus_node(id, _, _, _, 0, l), length(l)
+
+// Evaluate AST
+/*
+@demand("bf")
+rel eval(x, s as f64) = value_node(x, s, _, _)
+rel eval(x, y1 + y2) = plus_minus_node(x, "+", l, r, _, _), eval(l, y1), eval(r, y2)
+rel eval(x, y1 - y2) = plus_minus_node(x, "-", l, r, _, _), eval(l, y1), eval(r, y2)
+rel eval(x, y1 * y2) = mult_div_node(x, "*", l, r, _, _), eval(l, y1), eval(r, y2)
+rel eval(x, y1 / y2) = mult_div_node(x, "/", l, r, _, _), eval(l, y1), eval(r, y2), y2 != 0.0
+*/
+
+// Compute result
+rel result(e) = root_node(e)
+
+// Create neccessary code for printing the AST to post-fix notation
+
+type postfix(id:u64, notation: String)
+
+// Value node postfix is just the value node.
+rel postfix(id, s) = value_node(id, s, _, _)
+
+
+rel expression_postfix(notation) = root_node(id), postfix(id, notation)
+
+rel symbol = {(0, "3")}
+rel length = {(5)}
+
+query result

@@ -1,0 +1,141 @@
+// Lexing facts..
+
+type boolean(bool)
+
+rel boolean = {(true)}
+
+// old
+rel or_true(true, b) = all_bools(b) // If a=true, result is true for any b
+rel or_true(a,true) = all_bools(a) // if b=true, result is true for any a.
+
+rel xor_true(true, false) // This looks very similar to not_relation, but it's queried differently.
+rel xor_true(false, true) //
+
+// Now for NAND, which is compositional
+rel nand_true(a,b) = all_bools(a), all_bools(b), ~and_true(a,b)
+
+
+// There are two possible inputs: true and false. The domain.
+rel all_bools = {(true), (false)}
+
+// Define the identities in a much more specific manner.
+// NOT: not_relation(Input, Output)
+rel not_relation(true, false) // NOT true is false
+rel not_relation(false, true) // NOT false is true
+// Queried as not_relation(bool, r) where r is given (if bool=true, then r=false, or if bool=false then r=true).
+
+rel and_true(true, true) // Only true if both a and b are true.
+// AND: and_relation(A, B, Result)
+rel and_relation(true, true, true) // Define and as a truth table in the form of (A, B, result)
+rel and_relation(true, false, false)
+rel and_relation(false, true, false)
+rel and_relation(false, false, false)
+
+// OR: or_relation(A, B, Result)
+rel or_relation(true, true, true)
+rel or_relation(true, false, true)
+rel or_relation(false, true, true)
+rel or_relation(false, false, false)
+
+// XOR: xor_relation (A, B, Result)
+rel xor_relation(true, true, false)
+rel xor_relation(true, false, true)
+rel xor_relation(false, true, true)
+rel xor_relation (false, false, false)
+
+// Vector Representation...
+type vector_id = usize
+type vector_element(id: vector_id, index: usize, value: bool)
+
+// Now to define the operations on vectors...
+
+// -- NOT Operation --
+
+// Define the output type for the bitwise NOT
+type vector_not_result(output_id: vector_id, index: usize, value: bool)
+
+// Rule: Calculate 'index' of vector 'output_id' by negating element 'index' of vector 'input_id'.
+// We need a way to link input_id and output_id. Let's assuming that a seperate relation defines the operation request.
+type requested_not_op(input_id: vector_id, output_id: vector_id)
+
+rel vector_not_result(out_id, idx, neg_val) =
+    requested_not_op(in_id, out_id),        // If a NOT operation is requested from in_id to out_id ...
+    vector_element(in_id, idx, val),        // ... Get the element (idx, val) from the input vector...
+    not_relation(val, neg_val)              // ... Then find its negation neg_val.
+
+
+// -- OR Operation --
+
+type vector_or_result(output_id: vector_id, index: usize, value: bool)
+
+type requested_or_op(input_id_A: vector_id, input_id_B: vector_id, output_id: vector_id)
+
+// Rule: Calculate element 'index' of vector 'output_id' by OR-ing
+// elements at 'index' from vector 'input_id_A' and 'input_id_B'
+rel vector_or_result(out_id, idx, or_val) =
+    requested_or_op(in_id_A, in_id_B, out_id),      // If a OR operation is requested...
+    vector_element(in_id_A, idx, val_A),            // Get element from vector A...
+    vector_element(in_id_B, idx, val_B),            // Get element from vector B (at same index)...
+    or_relation(val_A, val_B, or_val)               // ... Then find the OR result 'or_val'
+
+// -- AND Operation --
+type vector_and_result(output_id: vector_id, index: usize, value: bool)
+
+type requested_and_op(input_id_A: vector_id, input_id_B: vector_id, output_id: vector_id)
+
+rel vector_and_result(out_id, idx, and_val) =
+    requested_and_op(in_id_A, in_id_B, out_id),      // If a AND operation is requested...
+    vector_element(in_id_A, idx, val_A),            // Get element from vector A...
+    vector_element(in_id_B, idx, val_B),            // Get element from vector B (at same index)...
+    and_relation(val_A, val_B, and_val)               // ... Then find the AND result 'and_val'
+
+// -- XOR Operation --
+type vector_xor_result(output_id: vector_id, index: usize, value: bool)
+
+type requested_xor_op(input_id_A: vector_id, input_id_B: vector_id, output_id: vector_id)
+
+rel vector_xor_result(out_id, idx, xor_val) =
+    requested_xor_op(in_id_A, in_id_B, out_id),      // If a XOR operation is requested...
+    vector_element(in_id_A, idx, val_A),            // Get element from vector A...
+    vector_element(in_id_B, idx, val_B),            // Get element from vector B (at same index)...
+    xor_relation(val_A, val_B, xor_val)               // ... Then find the XOR result 'xor_val'
+
+/*
+// Now to test things to make sure they work.
+rel vector_element = {
+    (0, 0, true),
+    (0, 1, true),
+    (0, 2, false),
+    (0, 3, false),
+    (2, 0, false),
+    (2, 1, true),
+    (2, 2, false),
+    (2, 3, true)
+}
+
+
+// Request a NOT for vector of id 0 and store it into vector of id 1.
+rel requested_not_op = {(0,1)}
+
+query vector_not_result(1, index, value)
+// Expected Result: {(1, 0, false),
+// (1, 1, false),
+// (1, 2, true),
+// (1, 3, true)}
+
+// Do it again but for OR. Get vector of id 0 and 2, and output to vector of id 3
+rel requested_or_op = {(0,2,3)}
+
+query vector_or_result(3, index, value)
+// vector_or_result(3, index, value): {(3, 0, true), (3, 1, true), (3, 2, false), (3, 3, true)}
+
+//Again, but for AND.
+rel requested_and_op = {(0,2,4)}
+
+query vector_and_result(4, index, value)
+
+//Again, but for XOR.
+rel requested_xor_op = {(0,2,5)}
+
+query vector_xor_result(5, index, value)
+*/
