@@ -4,11 +4,11 @@ import matplotlib.pyplot as plt
 import scallopy
 import os
 import time
+from rapidocr_onnxruntime import RapidOCR
 
 # --- Configuration ---
 SCALLOP_PROGRAM_PATH = "./scallop_bitwise/bitwise.scl"
-INPUT_IMAGE_PATH = "./scallop_bitwise/handwritten_input.png" # CREATE THIS IMAGE (e.g., "101 AND 011")
-IMG_SIZE_FOR_RECOGNITION = 28 # Standard MNIST/EMNIST size
+INPUT_IMAGE_PATH = "./scallop_bitwise/handwritten_input6.png"
 CONTOUR_MIN_AREA = 50 # Filter out tiny noise contours
 DEBUG_VISUALIZATION = True # Show intermediate steps
 
@@ -16,6 +16,28 @@ DEBUG_VISUALIZATION = True # Show intermediate steps
 ID_A = 0
 ID_B = 1
 ID_RESULT = 10 # Generic ID for output
+
+
+# Define the set of valid characters we expect from OCR
+VALID_OCR_CHARS = set(['0', '1', 'A', 'N', 'D', 'O', 'R', 'X'])
+
+# --- Initialize RapidOCR Engine ---
+# This will download default models on first run if specific paths are not given.
+# The default models typically include robust English recognition.
+# Using just RapidOCR() uses default models for detection, classification (optional), and recognition.
+# For recognizing pre-cropped characters, detection is less critical but harmless.
+print("Initializing RapidOCR engine...")
+try:
+    ocr_engine = RapidOCR(
+        params={"Global.lang_det": "en_mobile", "Global.lang_rec": "en_mobile",},
+        use_det=False, use_cls=True, use_rec=True
+        
+    )
+    print("RapidOCR engine initialized successfully.")
+except Exception as e:
+    print(f"Error initializing RapidOCR engine: {e}")
+    print("Make sure you have run 'pip install rapidocr-onnxruntime onnxruntime'")
+    exit()
 
 # --- Helper Functions (Adapted from minst_bitwise.py) ---
 
@@ -134,10 +156,10 @@ def preprocess_and_segment(image_path, min_area=50, debug_viz=False):
 
     # Find contours
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
     # Filter and get bounding boxes
     bounding_boxes = []
     img_for_viz = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR) if debug_viz else None
+    
     for contour in contours:
         area = cv2.contourArea(contour)
         if area > min_area:
@@ -147,52 +169,111 @@ def preprocess_and_segment(image_path, min_area=50, debug_viz=False):
                  cv2.rectangle(img_for_viz, (x, y), (x + w, y + h), (0, 255, 0), 1)
 
 
-    # Sort bounding boxes by x-coordinate
+    # Sort bounding boxes by x-coordinate (left-to-right)
     bounding_boxes.sort(key=lambda box: box[0])
 
     if debug_viz and img_for_viz is not None:
-        plt.figure(figsize=(8, 3))
+        plt.figure(figsize=(max(8, len(bounding_boxes)*0.5),3) ) # Adjust for the number of boxes... 
         plt.imshow(cv2.cvtColor(img_for_viz, cv2.COLOR_BGR2RGB))
-        plt.title("Detected Contours (Sorted Left-to-Right)")
+        plt.title(f"Detected Contours ({len(bounding_boxes)} sorted)")
         plt.show()
 
 
-    return img, thresh, bounding_boxes
+    return img, thresh, bounding_boxes #  Pass 'img' (original grayscale) to OCR for patches
 
-# *** SIMULATED RECOGNITION ***
-# In a real system, this function would use a trained NN model.
-# For this example, we rely on the known order of characters in the image.
-# You MUST create your input image (e.g., handwritten_input.png) to match this expected sequence.
-EXPECTED_SEQUENCE = ['1', '0', '1', 'A', 'N', 'D', '0', '1', '1'] # Example for "101 AND 011"
-
-def recognize_character_simulated(img_patch, index, expected_sequence):
-    """Simulates character recognition based on expected order."""
-    if index < len(expected_sequence):
-        char = expected_sequence[index]
-        print(f"Simulated Recognition: Box {index} -> '{char}'")
-        return char
-    else:
-        print(f"Warning: More bounding boxes ({index+1}) than expected characters ({len(expected_sequence)}).")
-        return None # Or raise error
-
-def extract_patches_and_recognize(img_thresh, bounding_boxes, expected_sequence):
-    """Extracts patches and uses simulated recognition."""
+def extract_patches_and_recognize_ocr(original_image, bounding_boxes, debug_viz=False):
+    """
+    Extracts character patches based on bounding_boxes from the original_image
+    and uses RapidOCR to recognize them.
+    """
     recognized_chars = []
+
+    if ocr_engine is None:
+        print("Error: OCR engine not initialized!")
+        return []
+
+    patches_for_viz = [] if debug_viz else None
+
     for i, (x, y, w, h) in enumerate(bounding_boxes):
-        # Extract the character patch
-        patch = img_thresh[y:y+h, x:x+w]
+        # Extract the character patch from the *original grayscale image*
+        # Add a small padding to the patch, OCR might perform better
+        padding = 5 # Pixels
+        y_start = max(0, y - padding)
+        y_end = min(original_image.shape[0], y + h + padding)
+        x_start = max(0, x - padding)
+        x_end = min(original_image.shape[1], x + w + padding)
+        patch = original_image[y_start:y_end, x_start:x_end]
 
-        # (Optional but good practice) Preprocess patch for NN:
-        # - Add padding to make it square
-        # - Resize to NN input size (e.g., 28x28)
-        # - Normalize pixel values
-        # Since recognition is simulated, we skip detailed NN preprocessing.
+        if patch.size == 0:
+            print(f"Warning: Empty patch for box {i} at ({x},{y},{w},{h}). Skipping.")
+            continue
 
-        # Simulate recognition
-        char = recognize_character_simulated(patch, i, expected_sequence)
-        if char:
-            recognized_chars.append(char)
+        if debug_viz and patches_for_viz is not None:
+            patches_for_viz.append(patch)
+        
+        # Perform OCR on the patch
+        # RapidOCR expects a BGR image or Grayscale. Grayscale is fine.
+        ocr_output, elapse = ocr_engine(patch) # ocr_output is [['text', score]], elapse is time
+
+        ocr_text = ""
+        confidence = 0.0
+
+        if ocr_output and isinstance(ocr_output, list) and len(ocr_output) > 0:
+            # When detection is off, RapidOCR often returns a list containing
+            # the recognized text and confidence for the given patch.
+            # The patch is given in the form of a list like: [['TEXT', score]]
+            recognition_item = ocr_output[0]
+
+            if isinstance(recognition_item, list) and len(recognition_item) == 2:
+                ocr_text = str(recognition_item[0]).strip().upper()
+                confidence = float(recognition_item[1])
+            elif isinstance(recognition_item, tuple):
+                # Fallback for other possible tuple formats (e.g., ('TEXT', score) or (None, 'TEXT', score))
+                if len(recognition_item) == 2: # ('TEXT', score)
+                    ocr_text = str(recognition_item[0]).strip().upper()
+                    confidence = float(recognition_item[1])
+                elif len(recognition_item) == 3 and recognition_item[0] is None: # (None, 'TEXT', score)
+                    ocr_text = str(recognition_item[1]).strip().upper() # Text is the second element
+                    confidence = float(recognition_item[2]) # Confidence is the third
+                else:
+                    print(f"Warning: OCR patch {i} had an unhandled tuple structure in recognition_item: {recognition_item}. Full OCR output: {ocr_output}")
+            else:
+                print(f"Warning: OCR patch {i} had an unexpected structure for recognition_item: {recognition_item}. Full OCR output: {ocr_output}")
+
+        # If ocr_output is None or an empty list, ocr_text remains "" and confidence 0.0.
+        # The 'else' block for "if ocr_text:" will catch this.
+
+        if ocr_text:
+            # Take the first character if OCR returns multiple (e.g., "1." -> "1")
+            char_candidate = ocr_text[0]
+            if char_candidate in VALID_OCR_CHARS:
+                recognized_chars.append(char_candidate)
+                print(f"OCR: Patch {i} -> '{char_candidate}' (from '{ocr_text}') with confidence: {confidence:.2f}")
+            else:
+                print(f"Warning: OCR for patch {i} -> '{char_candidate}' (from '{ocr_text}') is NOT in VALID_OCR_CHARS. Confidence: {confidence:.2f}. Full OCR Output: {ocr_output}")
+        else:
+            # This warning will now trigger if ocr_output was empty/None OR if parsing the structure failed.
+            print(f"Warning: OCR for patch {i} resulted in empty text after parsing. Raw OCR Output: {ocr_output}")
+
+    if debug_viz and patches_for_viz:
+        num_patches = len(patches_for_viz)
+        cols = 5
+        rows = (num_patches + cols - 1) // cols
+
+        if num_patches > 0:
+            plt.figure(figsize=(cols * 2, rows * 2))
+            for idx, p_img in enumerate(patches_for_viz):
+                plt.subplot(rows, cols, idx + 1)
+                plt.imshow(p_img, cmap='gray')
+                plt.title(f"P{idx}")
+                plt.axis('off')
+            plt.suptitle("Patches Sent to OCR")
+            plt.tight_layout()
+            plt.show()
+
     return recognized_chars
+
+
 
 # --- Parsing Logic ---
 
@@ -201,62 +282,103 @@ def parse_recognized_sequence(chars):
     operand1_str = ""
     operand2_str = ""
     operator_str = ""
-    state = "OPERAND1" # States: OPERAND1, OPERATOR, OPERAND2
+    
+    # States: PARSING_OP1, PARSING_OPERATOR_CHARS, PARSING_OP2
+    current_state = "PARSING_OP1"
 
-    for char in chars:
-        if state == "OPERAND1":
+    temp_operator_chars = [] # To build operator character by character
+
+    for char_idx, char_val in enumerate(chars):
+        char = str(char_val).upper() # Ensure it's an uppercase string.
+
+        if current_state == "PARSING_OP1":
             if char in ('0', '1'):
                 operand1_str += char
-            elif char in ('A', 'O', 'X'): # Start of Operator
-                operator_str += char
-                state = "OPERATOR"
+            elif char in ('A','O','X'): # Potential start of an operator
+                temp_operator_chars.append(char)
+                current_state = "PARSING_OPERATOR_CHARS"
             else:
-                raise ValueError(f"Unexpected character '{char}' while expecting operand 1 or start of operator.")
-        elif state == "OPERATOR":
-            if char in ('N', 'D', 'R'): # Continuing Operator (AND, OR)
-                 operator_str += char
-                 # Check for complete operators
-                 if operator_str in ("AND", "OR", "XOR"): # XOR is 3 letters
-                       if operator_str == "XOR":
-                           state = "OPERAND2" # Only move after full XOR
-                       # For AND/OR, we might see 'A', then 'N', then 'D'
-                       # Or 'O', then 'R'
-                       # Need to handle potential next char being a digit
-                 elif len(operator_str) > 3:
-                     raise ValueError(f"Invalid operator sequence: {operator_str}")
+                raise ValueError(f"Error (Operand 1): Unexpected char '{char}' at index {char_idx}. Operand1: '{operand1_str}'")
+        
+        elif current_state == "PARSING_OPERATOR_CHARS":
+            current_built_op = "".join(temp_operator_chars)
+            potential_op = current_built_op + char
 
-            elif char in ('0', '1'): # Operator finished, start operand 2
-                 if operator_str not in ("AND", "OR", "XOR"):
-                     # Allow single letter 'X' if followed by digit? Let's assume full words.
-                     # For simplicity, require full AND/OR/XOR before digits
-                     raise ValueError(f"Incomplete or invalid operator '{operator_str}' before digit '{char}'.")
-                 state = "OPERAND2"
-                 operand2_str += char
-            else:
-                 raise ValueError(f"Unexpected character '{char}' while parsing operator '{operator_str}'.")
-
-            # Handle transition after completing AND/OR
-            if state != "OPERAND2" and operator_str in ("AND", "OR"):
-                 # If the *next* character isn't a digit, it's an error
-                 # This check is tricky here, better done after loop or by peeking ahead
-                 # Let's simplify: assume operator is fully formed before digits start
-                 pass # Handled when digit appears
-
-        elif state == "OPERAND2":
+            # Check if current character extends a known operator
+            if char in ('0', '1'): # Digit encountered, operator must be complete
+                if current_built_op in ("AND", "OR", "XOR"):
+                    operator_str = current_built_op
+                    operand2_str += char # This digit is start of operand 2
+                    current_state = "PARSING_OP2"
+                    temp_operator_chars = [] # Clear temp
+                else:
+                    raise ValueError(f"Error (Operator): Digit '{char}' appeared after incomplete operator '{current_built_op}' at index {char_idx}.")
+            
+            # Check for multi-char operator continuations
+            elif potential_op == "AN" or \
+                 potential_op == "XO": # Intermediate parts of AND, XOR
+                temp_operator_chars.append(char)
+            elif potential_op == "AND" or \
+                 potential_op == "OR" or \
+                 potential_op == "XOR":
+                # Full operator formed by adding current char.
+                # If OR, it could also be "O" then "R".
+                if current_built_op == "O" and char == "R": # OR
+                     temp_operator_chars.append(char)
+                     # operator_str = "".join(temp_operator_chars) # Set below
+                     # current_state = "PARSING_OP2" # Set below
+                elif potential_op in ("AND", "XOR"):
+                    temp_operator_chars.append(char)
+                else: # Should not happen if char is not a digit and potential_op is not a valid continuation
+                    raise ValueError(f"Error (Operator): Unexpected char '{char}' when building operator from '{current_built_op}' at index {char_idx}.")
+                
+                # After appending, check if a full operator is formed
+                formed_op_check = "".join(temp_operator_chars)
+                if formed_op_check in ("AND", "OR", "XOR"):
+                    operator_str = formed_op_check
+                    current_state = "PARSING_OP2" # Expect operand 2 or end of sequence next
+                    temp_operator_chars = []
+                elif len(formed_op_check) >=3: # Max operator length
+                    raise ValueError(f"Error (Operator): Invalid operator sequence '{formed_op_check}' at index {char_idx}.")
+            else: # Character does not extend a known operator and is not a digit
+                raise ValueError(f"Error (Operator): Unexpected char '{char}' while building operator from '{current_built_op}' at index {char_idx}.")
+            
+        elif current_state == "PARSING_OP2":
             if char in ('0', '1'):
                 operand2_str += char
             else:
-                raise ValueError(f"Unexpected character '{char}' while expecting operand 2.")
+                raise ValueError(f"Error (Operand 2): Unexpected char '{char}' at index {char_idx}. Expected 0 or 1. Operand2: '{operand2_str}'")
+        
+        else: # Should not happen
+            raise ValueError(f"Unknown parsing state: {current_state}")
+    
+    # After loop, final validation
+    if not operand1_str:
+        raise ValueError("Parsing failed: Operand 1 is missing.")
+    
+    # If loop ended while still parsing operator characters, check if it's a valid one
+    if temp_operator_chars:
+        final_temp_op = "".join(temp_operator_chars)
+        if final_temp_op in ("AND", "OR", "XOR") and not operator_str:
+            operator_str = final_temp_op
+        else: # Incomplete operator at end of sequence
+            if not operator_str : # Only an error if no operator was formed before this
+                raise ValueError(f"Parsing failed: Sequence ended with incomplete operator '{final_temp_op}'.")
 
-    # Final validation
-    if not operand1_str: raise ValueError("Missing operand 1.")
-    if not operator_str: raise ValueError("Missing operator.")
-    if operator_str not in ("AND", "OR", "XOR"): raise ValueError(f"Invalid final operator: {operator_str}")
-    if not operand2_str: raise ValueError("Missing operand 2.")
-    if state != "OPERAND2": raise ValueError("Parsing did not end in the correct state.")
-
-
+    if not operator_str:
+        raise ValueError(f"Parsing failed: Operator is missing.")
+    if operator_str not in ("AND", "OR", "XOR"): # Double check recognized operator
+        raise ValueError(f"Parsing failed: Invalid final operator '{operator_str}'.")
+    if not operand2_str:
+        # This could happen if the input is "1 AND" (which is invalid for the problem)
+        # The current_state would be PARSING_OP2 but operand2_str is empty
+        raise ValueError("Parsing failed: Operand 2 is missing.")
+    
     return operand1_str, operator_str, operand2_str
+
+
+
+    #return operand1_str, operator_str, operand2_str
 
 # --- Main Execution Logic ---
 
@@ -276,19 +398,14 @@ if __name__ == "__main__":
     # 2. Load Image, Preprocess, Segment
     try:
         print(f"\nProcessing image: {INPUT_IMAGE_PATH}")
-        # Create a sample image 'handwritten_input.png' manually with "101 AND 011"
-        # Ensure characters are clearly separated. White background, black text is standard.
-        # If you draw black on white, the thresholding might need adjustment or inversion.
-        # Example: Use MSPaint, GIMP, etc. Font: Handwritten-style, Size: ~48pt
-        # Make sure the EXPECTED_SEQUENCE above matches your image content and order.
-        img, img_thresh, bounding_boxes = preprocess_and_segment(
+        # Ensure 'handwritten_input.png' exists and contains clearly separated characters
+        # like "1 0 1 A N D 0 1 1" (black characters on white background).
+        original_img, img_thresh_for_segmentation, bounding_boxes = preprocess_and_segment(
             INPUT_IMAGE_PATH,
             CONTOUR_MIN_AREA,
             DEBUG_VISUALIZATION
         )
         print(f"Found {len(bounding_boxes)} potential character contours.")
-        if len(bounding_boxes) != len(EXPECTED_SEQUENCE):
-             print(f"Warning: Number of contours ({len(bounding_boxes)}) does not match expected sequence length ({len(EXPECTED_SEQUENCE)}). Recognition might be incorrect.")
 
     except FileNotFoundError:
         print(f"Error: Input image '{INPUT_IMAGE_PATH}' not found.")
@@ -298,15 +415,19 @@ if __name__ == "__main__":
         print(f"Error during image processing: {e}")
         exit()
 
-    # 3. Simulated Character Recognition
-    print("\nSimulating character recognition...")
+    # 3. Character Recognition (using RapidOCR)
+    print("\nPerforming character recognition with RapidOCR...")
     try:
-        recognized_chars = extract_patches_and_recognize(img_thresh, bounding_boxes, EXPECTED_SEQUENCE)
-        print(f"Recognized sequence: {' '.join(recognized_chars)}")
+        # We pass the original_img (grayscale) for OCR, not the thresholded one used for segmentation
+        recognized_chars = extract_patches_and_recognize_ocr(original_img, bounding_boxes, debug_viz=DEBUG_VISUALIZATION)
+        print(f"OCR Recognized sequence: {' '.join(recognized_chars)}")
+        if not recognized_chars:
+            print("OCR did not recognize any valid characters. Check contour segmentation and OCR patch results.")
+            exit()
     except Exception as e:
-        print(f"Error during simulated recognition: {e}")
+        print(f"Error during OCR: {e}")
         exit()
-
+    
     # 4. Parse Sequence
     print("\nParsing recognized sequence...")
     try:
